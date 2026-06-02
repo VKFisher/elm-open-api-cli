@@ -9,7 +9,7 @@ node_modules
 
 # Other
 .direnv
-dist
+# dist/ is committed so this repo can be consumed as a git dependency.
 generated
 .elm-pages
 *.cpuprofile
