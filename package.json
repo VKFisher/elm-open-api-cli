@@ -15,8 +15,9 @@
         "test": "elm-test",
         "test:gen": "cd cli && elm-pages run src/TestGenScript.elm",
         "test:watch": "elm-test --watch",
-        "pub": "npm run build && npm publish"
+        "pub": "pnpm run build && pnpm publish"
     },
+    "packageManager": "pnpm@10.33.0",
     "author": "Wolfgang Schuster",
     "license": "MIT",
     "devDependencies": {

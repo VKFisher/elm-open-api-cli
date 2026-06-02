@@ -1,0 +1,35 @@
+# Supply-chain hardening (see https://pnpm.io/settings).
+# Rationale lives here so this file is understandable on its own.
+
+# Wait 30 days (43200 min) after a version is published before installing it,
+# so freshly-compromised releases age out before we pick them up.
+minimumReleaseAge: 43200
+
+# Fail install if a package's trust level drops vs. a previous release
+# (a signal of a compromised maintainer account).
+trustPolicy: no-downgrade
+# Old pinned transitive deps that predate provenance trip no-downgrade as
+# false positives. Excluded after manual review.
+trustPolicyExclude:
+  - semver
+
+# Only direct deps may use exotic sources (git/tarball URLs); all transitive
+# deps must resolve from the registry. (Default true; set explicitly.)
+blockExoticSubdeps: true
+
+# Fail install if any dependency has an unreviewed build script.
+# (Default true; set explicitly.) The allowlist below is the reviewed set.
+strictDepBuilds: true
+
+# Dependency install/build scripts are blocked by default in pnpm 10.
+# Only these trusted Elm-toolchain packages — which legitimately download
+# their compiler/formatter binaries on install — are allowed to run scripts.
+# Populated empirically from `pnpm install` output.
+# core-js is intentionally NOT here: its postinstall is only a funding
+# message, not a functional build step, so we leave it blocked.
+onlyBuiltDependencies:
+  - "@lydell/elm-json"
+  - elm
+  - elm-format
+  - esbuild
+  - lamdera
