@@ -2638,6 +2638,25 @@ operationToTypesExpectAndResolver effectTypes method pathUrl operation =
                     |> CliMonad.succeed
             }
 
+        expectNoContentBetter : Elm.Expression -> PerPackage (CliMonad (Elm.Expression -> Elm.Expression))
+        expectNoContentBetter errorDecoders =
+            { core =
+                OpenApi.Common.Internal.elmHttpSubmodule.call.expectNoContentCustom errorDecoders
+                    |> CliMonad.succeed
+            , elmPages =
+                always
+                    (Elm.value
+                        { importFrom = [ "BackendTask", "Http" ]
+                        , name = "expectWhatever"
+                        , annotation = Nothing
+                        }
+                    )
+                    |> CliMonad.succeed
+            , lamderaProgramTest =
+                OpenApi.Common.Internal.lamderaProgramTestSubmodule.call.expectNoContentCustomEffect errorDecoders
+                    |> CliMonad.succeed
+            }
+
         expectBytesBetter : Elm.Expression -> PerPackage (CliMonad (Elm.Expression -> Elm.Expression))
         expectBytesBetter errorDecoders =
             { core =
@@ -2788,10 +2807,10 @@ operationToTypesExpectAndResolver effectTypes method pathUrl operation =
                                                 , bodyTypeAnnotation = Elm.Annotation.string
                                                 , errorTypeDeclaration = errorTypeDeclaration_
                                                 , errorTypeAnnotation = errorTypeAnnotation
-                                                , expect = expectJsonBetter errorDecoders_ (Gen.Json.Decode.succeed Elm.unit)
+                                                , expect = expectNoContentBetter errorDecoders_
                                                 , resolver =
-                                                    { core = OpenApi.Common.Internal.elmHttpSubmodule.call.jsonResolverCustom errorDecoders_ (Gen.Json.Decode.succeed Elm.unit)
-                                                    , lamderaProgramTest = OpenApi.Common.Internal.lamderaProgramTestSubmodule.call.jsonResolverCustomEffect errorDecoders_ (Gen.Json.Decode.succeed Elm.unit)
+                                                    { core = OpenApi.Common.Internal.elmHttpSubmodule.call.noContentResolverCustom errorDecoders_
+                                                    , lamderaProgramTest = OpenApi.Common.Internal.lamderaProgramTestSubmodule.call.noContentResolverCustomEffect errorDecoders_
                                                     }
                                                 , isSinglePackage = isSinglePackage
                                                 , effectTypes = effectTypes

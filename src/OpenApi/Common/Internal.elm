@@ -109,6 +109,8 @@ type alias ElmHttpSubmodule =
     , stringResolverCustom : Elm.Expression -> Elm.Expression
     , expectBytesCustom : Elm.Expression -> Elm.Expression -> Elm.Expression
     , bytesResolverCustom : Elm.Expression -> Elm.Expression
+    , expectNoContentCustom : Elm.Expression -> Elm.Expression -> Elm.Expression
+    , noContentResolverCustom : Elm.Expression -> Elm.Expression
     }
 
 
@@ -121,6 +123,8 @@ elmHttpSubmodule =
         |> Elm.Declare.with stringResolverCustom
         |> Elm.Declare.with expectBytesCustom
         |> Elm.Declare.with bytesResolverCustom
+        |> Elm.Declare.with expectNoContentCustom
+        |> Elm.Declare.with noContentResolverCustom
         |> Elm.Declare.withUnexposed responseToResult
 
 
@@ -241,6 +245,47 @@ bytesResolverCustom =
             in
             Gen.Http.bytesResolver toResult
                 |> Elm.withType (Gen.Http.annotation_.resolver (errorAnnotation Gen.Bytes.annotation_.bytes) Gen.Bytes.annotation_.bytes)
+
+
+{-| For a no-content (e.g. 204) response: there's no body to decode, so succeed
+with unit — but assert the body really is empty, surfacing a server that wrongly
+returns content with a no-content status as a `BadBody` rather than silently
+dropping it. Custom error decoding is kept for the failure statuses.
+-}
+expectNoContentCustom : Elm.Declare.Function (Elm.Expression -> Elm.Expression -> Elm.Expression)
+expectNoContentCustom =
+    outerExpectStringCustom Elm.Annotation.unit
+        "expectNoContentCustom"
+        (\errorDecoders toMsg ->
+            let
+                toResult : Elm.Expression -> Elm.Expression
+                toResult response =
+                    responseToResultWrapped
+                        errorDecoders
+                        identity
+                        (\metadata body -> Elm.ifThen (Gen.String.call_.isEmpty body) (Gen.Result.make_.ok Elm.unit) (Gen.Result.make_.err (error.make_.badBody metadata body)))
+                        response
+            in
+            Gen.Http.expectStringResponse toMsg toResult
+                |> Elm.withType (Gen.Http.annotation_.expect (Elm.Annotation.var "msg"))
+        )
+
+
+noContentResolverCustom : Elm.Declare.Function (Elm.Expression -> Elm.Expression)
+noContentResolverCustom =
+    outerRawResolverCustom "noContentResolverCustom" <|
+        \errorDecoders ->
+            let
+                toResult : Elm.Expression -> Elm.Expression
+                toResult response =
+                    responseToResultWrapped
+                        errorDecoders
+                        identity
+                        (\metadata body -> Elm.ifThen (Gen.String.call_.isEmpty body) (Gen.Result.make_.ok Elm.unit) (Gen.Result.make_.err (error.make_.badBody metadata body)))
+                        response
+            in
+            Gen.Http.stringResolver toResult
+                |> Elm.withType (Gen.Http.annotation_.resolver (errorAnnotation Elm.Annotation.string) Elm.Annotation.unit)
 
 
 expectBase64Custom : Elm.Declare.Function (Elm.Expression -> Elm.Expression -> Elm.Expression)
@@ -383,6 +428,8 @@ type alias LamderaProgramTestSubmodule =
     , stringResolverCustomEffect : Elm.Expression -> Elm.Expression
     , expectBytesCustomEffect : Elm.Expression -> Elm.Expression -> Elm.Expression
     , bytesResolverCustomEffect : Elm.Expression -> Elm.Expression
+    , expectNoContentCustomEffect : Elm.Expression -> Elm.Expression -> Elm.Expression
+    , noContentResolverCustomEffect : Elm.Expression -> Elm.Expression
     }
 
 
@@ -395,6 +442,8 @@ lamderaProgramTestSubmodule =
         |> Elm.Declare.with stringResolverCustomEffect
         |> Elm.Declare.with expectBytesCustomEffect
         |> Elm.Declare.with bytesResolverCustomEffect
+        |> Elm.Declare.with expectNoContentCustomEffect
+        |> Elm.Declare.with noContentResolverCustomEffect
         |> Elm.Declare.withUnexposed responseToResultEffect
 
 
@@ -511,6 +560,42 @@ stringResolverCustomEffect =
             in
             Gen.Effect.Http.stringResolver toResult
                 |> Elm.withType (Gen.Effect.Http.annotation_.resolver (Elm.Annotation.var "restrictions") (errorAnnotation Elm.Annotation.string) Elm.Annotation.string)
+
+
+expectNoContentCustomEffect : Elm.Declare.Function (Elm.Expression -> Elm.Expression -> Elm.Expression)
+expectNoContentCustomEffect =
+    outerExpectStringCustom Elm.Annotation.unit
+        "expectNoContentCustomEffect"
+        (\errorDecoders toMsg ->
+            let
+                toResult : Elm.Expression -> Elm.Expression
+                toResult response =
+                    responseToResultEffectWrapped
+                        errorDecoders
+                        identity
+                        (\metadata body -> Elm.ifThen (Gen.String.call_.isEmpty body) (Gen.Result.make_.ok Elm.unit) (Gen.Result.make_.err (error.make_.badBody metadata body)))
+                        response
+            in
+            Gen.Effect.Http.expectStringResponse toMsg toResult
+                |> Elm.withType (Gen.Effect.Http.annotation_.expect (Elm.Annotation.var "msg"))
+        )
+
+
+noContentResolverCustomEffect : Elm.Declare.Function (Elm.Expression -> Elm.Expression)
+noContentResolverCustomEffect =
+    outerRawResolverCustom "noContentResolverCustomEffect" <|
+        \errorDecoders ->
+            let
+                toResult : Elm.Expression -> Elm.Expression
+                toResult response =
+                    responseToResultEffectWrapped
+                        errorDecoders
+                        identity
+                        (\metadata body -> Elm.ifThen (Gen.String.call_.isEmpty body) (Gen.Result.make_.ok Elm.unit) (Gen.Result.make_.err (error.make_.badBody metadata body)))
+                        response
+            in
+            Gen.Effect.Http.stringResolver toResult
+                |> Elm.withType (Gen.Effect.Http.annotation_.resolver (Elm.Annotation.var "restrictions") (errorAnnotation Elm.Annotation.string) Elm.Annotation.unit)
 
 
 expectBase64CustomEffect : Elm.Declare.Function (Elm.Expression -> Elm.Expression -> Elm.Expression)
