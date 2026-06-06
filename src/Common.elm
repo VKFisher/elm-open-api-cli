@@ -517,6 +517,12 @@ type alias OneOfData =
     { name : UnsafeName
     , type_ : Type
     , documentation : Maybe String
+
+    -- For an externally-tagged variant — a wire object `{ "<key>": <payload> }`
+    -- whose single key names the variant — this is `Just <key>`. The decoder then
+    -- digs into that field and the encoder wraps the payload back under it. `Nothing`
+    -- is the plain form, decoded/encoded as `type_` directly.
+    , tag : Maybe UnsafeName
     }
 
 

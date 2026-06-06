@@ -1514,10 +1514,38 @@ subschemaToEnumMaybe subSchema =
 
 
 type alias VariantInfo =
-    { name : Common.UnsafeName
-    , type_ : Common.Type
-    , documentation : Maybe String
-    }
+    Common.OneOfData
+
+
+{-| Externally-tagged variant: the payload sits under the tag key, so dig into
+that field. A plain variant (`Nothing`) decodes the value directly.
+-}
+wrapTaggedDecoder : Maybe Common.UnsafeName -> Elm.Expression -> Elm.Expression
+wrapTaggedDecoder maybeTag decoder =
+    case maybeTag of
+        Just tag ->
+            Gen.Json.Decode.field (Common.unwrapUnsafe tag) decoder
+
+        Nothing ->
+            decoder
+
+
+{-| Mirror of `wrapTaggedDecoder` for encoding: wrap the payload back under the
+tag key as `{ "<tag>": <payload> }`. A plain variant encodes the value directly.
+-}
+wrapTaggedEncoder :
+    Maybe Common.UnsafeName
+    -> (Elm.Expression -> Elm.Expression)
+    -> (Elm.Expression -> Elm.Expression)
+wrapTaggedEncoder maybeTag encoder =
+    case maybeTag of
+        Just tag ->
+            \content ->
+                Gen.Json.Encode.object
+                    [ Elm.tuple (Elm.string (Common.unwrapUnsafe tag)) (encoder content) ]
+
+        Nothing ->
+            encoder
 
 
 typeToOneOfVariant : { type_ : Common.Type, documentation : Maybe String } -> CliMonad (Maybe VariantInfo)
@@ -1532,6 +1560,7 @@ typeToOneOfVariant { type_, documentation } =
                             { name = Common.UnsafeName (label ++ Common.unwrapUnsafe inner.name)
                             , type_ = type_
                             , documentation = documentation
+                            , tag = Nothing
                             }
                         )
                     )
@@ -1544,6 +1573,7 @@ typeToOneOfVariant { type_, documentation } =
                         { name = Common.UnsafeName (label ++ Common.unwrapUnsafe inner1.name ++ Common.unwrapUnsafe inner2.name)
                         , type_ = type_
                         , documentation = documentation
+                        , tag = Nothing
                         }
                     )
                 )
@@ -1558,6 +1588,7 @@ typeToOneOfVariant { type_, documentation } =
                         { name = Common.UnsafeName (label ++ Common.unwrapUnsafe inner1.name ++ Common.unwrapUnsafe inner2.name ++ Common.unwrapUnsafe inner3.name)
                         , type_ = type_
                         , documentation = documentation
+                        , tag = Nothing
                         }
                     )
                 )
@@ -1570,6 +1601,7 @@ typeToOneOfVariant { type_, documentation } =
             { name = name
             , type_ = type_
             , documentation = documentation
+            , tag = Nothing
             }
                 |> Just
                 |> CliMonad.succeed
@@ -1591,6 +1623,7 @@ typeToOneOfVariant { type_, documentation } =
                 { name = Common.UnsafeName rawName
                 , type_ = type_
                 , documentation = documentation
+                , tag = Nothing
                 }
                     |> Just
                     |> CliMonad.succeed
@@ -1613,6 +1646,24 @@ typeToOneOfVariant { type_, documentation } =
 
         Common.Dict _ _ ->
             CliMonad.succeed Nothing
+
+        Common.Object _ [ ( key, field ) ] ->
+            -- An externally-tagged variant: a wire object with a single required
+            -- property whose key names the variant and whose value is the payload.
+            -- The key disambiguates at decode time, so unlike a bare object this is
+            -- nameable and unambiguous. An optional property can't carry the tag
+            -- (the field may be absent), so it falls through to the bare-object case.
+            if field.required then
+                { name = key
+                , type_ = field.type_
+                , documentation = documentation
+                , tag = Just key
+                }
+                    |> Just
+                    |> CliMonad.succeed
+
+            else
+                CliMonad.succeed Nothing
 
         Common.Object _ _ ->
             CliMonad.succeed Nothing
@@ -1684,12 +1735,7 @@ oneOfType types =
 
                     Just variants ->
                         let
-                            sortedVariants :
-                                NonEmpty.NonEmpty
-                                    { name : Common.UnsafeName
-                                    , type_ : Common.Type
-                                    , documentation : Maybe String
-                                    }
+                            sortedVariants : NonEmpty.NonEmpty Common.OneOfData
                             sortedVariants =
                                 NonEmpty.sortBy (\{ name } -> Common.unwrapUnsafe name) variants
 
@@ -1884,7 +1930,7 @@ oneOfDeclaration :
     -> CliMonad CliMonad.Declaration
 oneOfDeclaration ( oneOfName, variants ) =
     let
-        variantDeclaration : { name : Common.UnsafeName, type_ : Common.Type, documentation : Maybe String } -> CliMonad Elm.Variant
+        variantDeclaration : Common.OneOfData -> CliMonad Elm.Variant
         variantDeclaration { name, type_ } =
             typeToAnnotationWithNullable type_
                 |> CliMonad.map
@@ -2356,7 +2402,9 @@ typeToEncoder type_ =
                                     variantEncoder
                             )
                             (typeToAnnotationWithNullable variant.type_)
-                            (typeToEncoder variant.type_)
+                            (typeToEncoder variant.type_
+                                |> CliMonad.map (wrapTaggedEncoder variant.tag)
+                            )
                             |> CliMonad.withPath variant.name
                     )
                 |> CliMonad.map2
@@ -2702,6 +2750,7 @@ typeToDecoder type_ =
                 |> CliMonad.combineMap
                     (\variant ->
                         typeToDecoder variant.type_
+                            |> CliMonad.map (wrapTaggedDecoder variant.tag)
                             |> CliMonad.map2
                                 (\importFrom ->
                                     Gen.Json.Decode.call_.map

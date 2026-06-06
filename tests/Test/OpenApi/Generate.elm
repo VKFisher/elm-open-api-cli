@@ -1,4 +1,4 @@
-module Test.OpenApi.Generate exposing (fuzzInputName, fuzzTitle, issue48, noEnumSort, pathLevelParams, pr267, uuidArrayParam)
+module Test.OpenApi.Generate exposing (externallyTaggedOneOf, fuzzInputName, fuzzTitle, issue48, noEnumSort, pathLevelParams, pr267, uuidArrayParam)
 
 import Ansi.Color
 import CliMonad
@@ -718,6 +718,131 @@ noEnumSort =
 
                         ( _, Err e ) ->
                             Expect.fail ("Error generating sorted: " ++ Debug.toString e)
+
+
+externallyTaggedOneOf : Test
+externallyTaggedOneOf =
+    Test.test "An externally-tagged oneOf component becomes a sum type named after the component, decoded/encoded via the tag key" <|
+        \() ->
+            let
+                oasString : String
+                oasString =
+                    String.Multiline.here """
+                        openapi: "3.1.0"
+                        info:
+                          title: "Externally Tagged OneOf Test"
+                          version: "1.0.0"
+                        components:
+                          schemas:
+                            SessionReady:
+                              type: object
+                              properties:
+                                token:
+                                  type: string
+                              required:
+                                - token
+                            SelectionRequired:
+                              type: object
+                              properties:
+                                identityToken:
+                                  type: string
+                              required:
+                                - identityToken
+                            LoginResponse:
+                              oneOf:
+                                - type: object
+                                  properties:
+                                    SessionReady:
+                                      $ref: "#/components/schemas/SessionReady"
+                                  required:
+                                    - SessionReady
+                                - type: object
+                                  properties:
+                                    SelectionRequired:
+                                      $ref: "#/components/schemas/SelectionRequired"
+                                  required:
+                                    - SelectionRequired
+                        paths:
+                          /login:
+                            post:
+                              operationId: login
+                              responses:
+                                "200":
+                                  description: OK
+                                  content:
+                                    application/json:
+                                      schema:
+                                        $ref: "#/components/schemas/LoginResponse"
+                    """
+            in
+            case
+                oasString
+                    |> Yaml.Decode.fromString yamlToJsonValueDecoder
+                    |> Result.mapError Debug.toString
+                    |> Result.andThen
+                        (\json ->
+                            json
+                                |> Json.Decode.decodeValue OpenApi.decode
+                                |> Result.mapError Debug.toString
+                        )
+            of
+                Err e ->
+                    Expect.fail e
+
+                Ok oas ->
+                    case
+                        OpenApi.Generate.files
+                            { namespace = [ "Output" ]
+                            , generateTodos = False
+                            , effectTypes = [ OpenApi.Config.ElmHttpCmd ]
+                            , server = OpenApi.Config.Default
+                            , formats = OpenApi.Config.defaultFormats
+                            , warnOnMissingEnums = True
+                            , keepGoing = False
+                            , noEnumSort = False
+                            }
+                            oas
+                    of
+                        Err e ->
+                            Expect.fail ("Error generating: " ++ Debug.toString e)
+
+                        Ok { modules } ->
+                            let
+                                moduleAsString : List String -> String
+                                moduleAsString name =
+                                    modules
+                                        |> List.filter (\m -> m.moduleName == name)
+                                        |> List.head
+                                        |> Maybe.map fileToString
+                                        |> Maybe.withDefault ""
+
+                                types : String
+                                types =
+                                    moduleAsString [ "Output", "Types" ]
+
+                                json : String
+                                json =
+                                    moduleAsString [ "Output", "Json" ]
+                            in
+                            Expect.all
+                                [ \_ ->
+                                    -- The component name is the sum type (no alias, no synthesized A_Or_B);
+                                    -- variants are sorted, so SelectionRequired precedes SessionReady.
+                                    types
+                                        |> expectContains "type LoginResponse\n    = LoginResponse__SelectionRequired SelectionRequired\n    | LoginResponse__SessionReady SessionReady"
+                                , \_ ->
+                                    -- Decoder digs into the tag field rather than trying bare shapes in order.
+                                    json
+                                        |> expectContains "Json.Decode.field \"SelectionRequired\" decodeSelectionRequired"
+                                , \_ ->
+                                    json
+                                        |> expectContains "Json.Decode.field \"SessionReady\" decodeSessionReady"
+                                , \_ ->
+                                    -- Encoder wraps the payload back under the tag key.
+                                    json
+                                        |> expectContains "( \"SessionReady\", encodeSessionReady content )"
+                                ]
+                                ()
 
 
 pathLevelParams : Test

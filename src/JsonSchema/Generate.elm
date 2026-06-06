@@ -64,6 +64,9 @@ schemaToDeclarations component name schema =
                     Common.Enum enumVariants ->
                         enumToDeclarations component name documentation enumVariants
 
+                    Common.OneOf _ data ->
+                        oneOfToDeclarations component name documentation data
+
                     _ ->
                         nonEnumToDeclarations component name schema documentation type_
             )
@@ -235,6 +238,101 @@ enumToDeclarations component name documentation enumVariants =
         (CliMonad.moduleToNamespace (Common.Types component))
     ]
         |> CliMonad.combine
+
+
+{-| A component whose body is a `oneOf` becomes a sum type named after the
+component itself — `type LoginResponseTO = LoginResponseTO__SessionReady … | …` —
+the same way an enum component does, rather than an alias onto a synthesized
+`A_Or_B` name. Renaming the variant set to the component name (`renamed`) is what
+drives the constructor names and the decoder/encoder.
+
+The sum type lives in the shared `Types Schema` module, matching where
+`typeToDecoder`/`typeToEncoder` resolve a `oneOf` type from; for a schema
+component that is also where it would land anyway.
+
+-}
+oneOfToDeclarations :
+    Common.Component
+    -> Common.UnsafeName
+    -> Maybe String
+    -> ( Common.OneOfData, List Common.OneOfData )
+    -> CliMonad (List CliMonad.Declaration)
+oneOfToDeclarations component name documentation data =
+    let
+        typeName : Common.TypeName
+        typeName =
+            Common.toTypeName name
+
+        renamed : Common.Type
+        renamed =
+            Common.OneOf typeName data
+
+        typeDeclaration : CliMonad CliMonad.Declaration
+        typeDeclaration =
+            data
+                |> NonEmpty.toList
+                |> CliMonad.combineMap
+                    (\variant ->
+                        SchemaUtils.typeToAnnotationWithNullable variant.type_
+                            |> CliMonad.map
+                                (\variantAnnotation ->
+                                    Elm.variantWith
+                                        (SchemaUtils.toVariantName typeName variant.name)
+                                        [ variantAnnotation ]
+                                )
+                            |> CliMonad.withPath variant.name
+                    )
+                |> CliMonad.map
+                    (\variants ->
+                        { moduleName = Common.Types Common.Schema
+                        , name = typeName
+                        , group = "One of"
+                        , declaration =
+                            variants
+                                |> Elm.customType typeName
+                                |> Elm.Extra.withDocumentationMaybe documentation
+                                |> Elm.exposeConstructor
+                        }
+                    )
+
+        decoderDeclaration : CliMonad CliMonad.Declaration
+        decoderDeclaration =
+            CliMonad.map2
+                (\importFrom decoder ->
+                    { moduleName = Common.Json component
+                    , name = "decode" ++ typeName
+                    , group = "Decoders"
+                    , declaration =
+                        Elm.declaration
+                            ("decode" ++ typeName)
+                            (decoder
+                                |> Elm.withType (Gen.Json.Decode.annotation_.decoder (Elm.Annotation.named importFrom typeName))
+                            )
+                            |> Elm.expose
+                    }
+                )
+                (CliMonad.moduleToNamespace (Common.Types Common.Schema))
+                (SchemaUtils.typeToDecoder renamed)
+
+        encoderDeclaration : CliMonad CliMonad.Declaration
+        encoderDeclaration =
+            CliMonad.map2
+                (\importFrom encoder ->
+                    { moduleName = Common.Json component
+                    , name = "encode" ++ typeName
+                    , group = "Encoders"
+                    , declaration =
+                        Elm.declaration ("encode" ++ typeName)
+                            (Elm.functionReduced "rec" encoder
+                                |> Elm.withType (Elm.Annotation.function [ Elm.Annotation.named importFrom typeName ] Gen.Json.Encode.annotation_.value)
+                            )
+                            |> Elm.expose
+                    }
+                )
+                (CliMonad.moduleToNamespace (Common.Types Common.Schema))
+                (SchemaUtils.typeToEncoder renamed)
+    in
+    CliMonad.combine [ typeDeclaration, decoderDeclaration, encoderDeclaration ]
 
 
 nonEnumToDeclarations :
