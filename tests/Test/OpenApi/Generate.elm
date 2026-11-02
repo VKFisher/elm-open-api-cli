@@ -1,4 +1,4 @@
-module Test.OpenApi.Generate exposing (externallyTaggedOneOf, fuzzInputName, fuzzTitle, issue48, noEnumSort, pathLevelParams, pr267, uuidArrayParam)
+module Test.OpenApi.Generate exposing (externallyTaggedOneOf, fuzzInputName, fuzzTitle, issue48, noEnumSort, pathLevelParams, pr267, sameValuedEnumParams, uuidArrayParam)
 
 import Ansi.Color
 import CliMonad
@@ -841,6 +841,105 @@ externallyTaggedOneOf =
                                     -- Encoder wraps the payload back under the tag key.
                                     json
                                         |> expectContains "( \"SessionReady\", encodeSessionReady content )"
+                                ]
+                                ()
+
+
+sameValuedEnumParams : Test
+sameValuedEnumParams =
+    Test.test "Query parameters referencing distinct enum components with the same values each use their own toString" <|
+        \() ->
+            let
+                oasString : String
+                oasString =
+                    String.Multiline.here """
+                        openapi: "3.1.0"
+                        info:
+                          title: "Same-Valued Enums Test"
+                          version: "1.0.0"
+                        components:
+                          schemas:
+                            AlphaSort:
+                              type: string
+                              enum:
+                                - name
+                                - code
+                            BetaSort:
+                              type: string
+                              enum:
+                                - name
+                                - code
+                        paths:
+                          /alphas:
+                            get:
+                              operationId: listAlphas
+                              parameters:
+                                - name: sort
+                                  in: query
+                                  required: false
+                                  schema:
+                                    $ref: "#/components/schemas/AlphaSort"
+                              responses:
+                                "204":
+                                  description: OK
+                          /betas:
+                            get:
+                              operationId: listBetas
+                              parameters:
+                                - name: sort
+                                  in: query
+                                  required: false
+                                  schema:
+                                    $ref: "#/components/schemas/BetaSort"
+                              responses:
+                                "204":
+                                  description: OK
+                    """
+            in
+            case
+                oasString
+                    |> Yaml.Decode.fromString yamlToJsonValueDecoder
+                    |> Result.mapError Debug.toString
+                    |> Result.andThen
+                        (\json ->
+                            json
+                                |> Json.Decode.decodeValue OpenApi.decode
+                                |> Result.mapError Debug.toString
+                        )
+            of
+                Err e ->
+                    Expect.fail e
+
+                Ok oas ->
+                    case
+                        OpenApi.Generate.files
+                            { namespace = [ "Output" ]
+                            , generateTodos = False
+                            , effectTypes = [ OpenApi.Config.ElmHttpCmd ]
+                            , server = OpenApi.Config.Default
+                            , formats = OpenApi.Config.defaultFormats
+                            , warnOnMissingEnums = True
+                            , keepGoing = False
+                            , noEnumSort = False
+                            }
+                            oas
+                    of
+                        Err e ->
+                            Expect.fail ("Error generating: " ++ Debug.toString e)
+
+                        Ok { modules } ->
+                            let
+                                api : String
+                                api =
+                                    modules
+                                        |> List.filter (\m -> m.moduleName == [ "Output", "Api" ])
+                                        |> List.head
+                                        |> Maybe.map fileToString
+                                        |> Maybe.withDefault ""
+                            in
+                            Expect.all
+                                [ \_ -> api |> expectContains "Output.Types.alphaSortToString"
+                                , \_ -> api |> expectContains "Output.Types.betaSortToString"
                                 ]
                                 ()
 

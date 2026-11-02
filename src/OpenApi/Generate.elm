@@ -2385,7 +2385,18 @@ paramToString type_ =
             --  These are mostly aliases
             SchemaUtils.getSchema ref
                 |> CliMonad.andThen (SchemaUtils.schemaToType [])
-                |> CliMonad.andThen (\param -> paramToString param.type_)
+                |> CliMonad.andThen
+                    (\param ->
+                        case param.type_ of
+                            Common.Enum _ ->
+                                -- Enums are registered by their sorted values, so two named
+                                -- enums with the same values share one entry. The ref's own
+                                -- name is the one the parameter's annotation uses.
+                                namedEnumToString (Tuple.second (Common.unwrapRef ref))
+
+                            _ ->
+                                paramToString param.type_
+                    )
 
         Common.OneOf name data ->
             CliMonad.map2
@@ -2431,21 +2442,7 @@ paramToString type_ =
                                 { inputToString = Identity, alwaysJust = True, isMaybe = False }
 
                             Just name ->
-                                { inputToString =
-                                    InputToString
-                                        (\val ->
-                                            Elm.apply
-                                                (Elm.value
-                                                    { importFrom = importFrom
-                                                    , name = Common.toValueName name ++ "ToString"
-                                                    , annotation = Nothing
-                                                    }
-                                                )
-                                                [ val ]
-                                        )
-                                , alwaysJust = True
-                                , isMaybe = False
-                                }
+                                enumToStringIn importFrom name
                     )
                     (CliMonad.moduleToNamespace (Common.Types Common.Schema))
 
@@ -2465,6 +2462,31 @@ paramToString type_ =
                             }
                             msg
                     )
+
+
+namedEnumToString : Common.UnsafeName -> CliMonad { inputToString : InputToString, alwaysJust : Bool, isMaybe : Bool }
+namedEnumToString name =
+    CliMonad.moduleToNamespace (Common.Types Common.Schema)
+        |> CliMonad.map (\importFrom -> enumToStringIn importFrom name)
+
+
+enumToStringIn : List String -> Common.UnsafeName -> { inputToString : InputToString, alwaysJust : Bool, isMaybe : Bool }
+enumToStringIn importFrom name =
+    { inputToString =
+        InputToString
+            (\val ->
+                Elm.apply
+                    (Elm.value
+                        { importFrom = importFrom
+                        , name = Common.toValueName name ++ "ToString"
+                        , annotation = Nothing
+                        }
+                    )
+                    [ val ]
+            )
+    , alwaysJust = True
+    , isMaybe = False
+    }
 
 
 inputToStringToFunction : InputToString -> Elm.Expression -> Elm.Expression
